@@ -1,0 +1,642 @@
+<!-- <!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Comparison</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            font-family: Arial, sans-serif;
+            position: relative;
+            background-image: url('./static/sound.jpg');
+            background-size: cover;
+            background-position: center;
+        }
+
+        .container {
+            text-align: center;
+            background: rgba(255, 255, 255, 0.7);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .logo-left {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            border-radius: 10px;
+            width: 100px;
+            height: auto;
+        }
+
+        .logo-right {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            border-radius: 10px;
+            width: 100px;
+            height: auto;
+        }
+
+        .result {
+            width: 100px;
+            height: 100px;
+            border-radius: 10px;
+            margin-top: 20px;
+            text-align: center;
+            line-height: 100px;
+            font-size: 20px;
+            font-weight: bold;
+            display: inline-block;
+        }
+
+        .match {
+            background-color: green;
+            color: white;
+        }
+
+        #clock {
+            font-size: 3em;
+            margin-bottom: 20px;
+        }
+
+        button {
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px;
+            transition: background-color 0.3s, transform 0.3s;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        button:active {
+            background-color: #004080;
+            transform: scale(0.95);
+        }
+    </style>
+    <style>
+        @keyframes flash {
+            0% { background-color: rgba(255, 255, 255, 0.7); }
+            50% { background-color: rgba(255, 255, 255, 1); }
+            100% { background-color: rgba(255, 255, 255, 0.7); }
+        }
+    
+        .flash {
+            animation: flash 1s ease-in-out;
+        }
+    </style>
+    
+</head>
+
+<body>
+    <img src="./static/download (1).jpg" alt="Left Logo" class="logo-left">
+    <img src="./static/download (2).jpg" alt="Right Logo" class="logo-right">
+    <div class="container">
+        <div id="clock"></div>
+        <h1>Record Master Audio</h1>
+        <button id="recordMaster">Start Recording Master</button>
+        <br>
+        <div id="audioMasterContainer"></div>
+        <h1>Check Sample Audio</h1>
+        <button id="recordSample">Start Recording Sample</button>
+        <button id="stopRecording" style="display: none;">Stop Recording</button>
+        <br>
+        <div id="audioSampleContainer"></div>
+        <div id="result" class="result">Result: Waiting...</div>
+    </div>
+
+    <script>
+        const recordMasterButton = document.getElementById('recordMaster');
+        const recordSampleButton = document.getElementById('recordSample');
+        const stopRecordingButton = document.getElementById('stopRecording');
+        const resultDiv = document.getElementById('result');
+        const audioMasterContainer = document.getElementById('audioMasterContainer');
+        const audioSampleContainer = document.getElementById('audioSampleContainer');
+
+        let masterRecorded = false;
+        let masterAudioBlob = null;
+        let continuousRecording = false;
+
+        recordMasterButton.addEventListener('click', () => {
+            recordAudio('master');
+        });
+
+        recordSampleButton.addEventListener('click', () => {
+            continuousRecording = true;
+            recordSampleButton.style.display = 'none';
+            stopRecordingButton.style.display = 'inline-block';
+            if (!masterRecorded && masterAudioBlob) {
+                sendToServer(masterAudioBlob, 'master');
+            }
+            continuouslyRecordAndCompare();
+        });
+
+        stopRecordingButton.addEventListener('click', () => {
+            continuousRecording = false;
+            recordSampleButton.style.display = 'inline-block';
+            stopRecordingButton.style.display = 'none';
+        });
+
+        function recordAudio(type) {
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    const mediaRecorder = new MediaRecorder(stream);
+                    let chunks = [];
+
+                    mediaRecorder.start();
+
+                    mediaRecorder.addEventListener('dataavailable', event => {
+                        chunks.push(event.data);
+                    });
+
+                    mediaRecorder.addEventListener('stop', () => {
+                        const blob = new Blob(chunks, { 'type': 'audio/wav' });
+                        const audioUrl = URL.createObjectURL(blob);
+
+                        if (type === 'master') {
+                            if (audioMasterContainer.querySelector('audio')) {
+                                audioMasterContainer.querySelector('audio').remove();
+                            }
+                            const masterAudio = new Audio(audioUrl);
+                            masterAudio.controls = true;
+                            audioMasterContainer.appendChild(masterAudio);
+                            masterRecorded = true;
+                            masterAudioBlob = blob;
+                        } else {
+                            if (audioSampleContainer.querySelector('audio')) {
+                                audioSampleContainer.querySelector('audio').remove();
+                            }
+                            const sampleAudio = new Audio(audioUrl);
+                            sampleAudio.controls = true;
+                            audioSampleContainer.appendChild(sampleAudio);
+                        }
+
+                        sendToServer(blob, type);
+                        stream.getTracks().forEach(track => track.stop());
+                    });
+
+                    setTimeout(() => {
+                        mediaRecorder.stop();
+                    }, 1000);
+                })
+                .catch(error => {
+                    console.error('Error accessing microphone:', error);
+                });
+        }
+
+        function sendToServer(blob, type) {
+            const formData = new FormData();
+            formData.append('audio', blob);
+            formData.append('type', type);
+
+            fetch('/compare', {
+                method: 'POST',
+                body: formData
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (type === 'sample') {
+                        if (data.result === 'Match') {
+                            resultDiv.innerText = 'Match';
+                            resultDiv.className = 'result match';
+                            setTimeout(() => {
+                                resultDiv.className = 'result';
+                                resultDiv.innerText = 'Result: Waiting...';
+                                if (continuousRecording) {
+                                    continuouslyRecordAndCompare();
+                                }
+                            }, 1000);
+                        } else {
+                            if (continuousRecording) {
+                                continuouslyRecordAndCompare();
+                            }
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+        }
+
+        function continuouslyRecordAndCompare() {
+            if (continuousRecording) {
+                recordAudio('sample');
+            }
+        }
+
+        function updateClock() {
+            const now = new Date();
+            const hours = now.getHours().toString().padStart(2, '0');
+            const minutes = now.getMinutes().toString().padStart(2, '0');
+            const seconds = now.getSeconds().toString().padStart(2, '0');
+
+            const clockDisplay = `${hours}:${minutes}:${seconds}`;
+            document.getElementById('clock').innerText = clockDisplay;
+        }
+
+        function updateClockEverySecond() {
+            updateClock();
+            setInterval(updateClock, 1000);
+        }
+
+        updateClockEverySecond();
+    </script>
+    <script>
+        const containerDiv = document.querySelector('.container');
+
+function triggerFlash() {
+    containerDiv.classList.add('flash');
+    setTimeout(() => {
+        containerDiv.classList.remove('flash');
+    }, 1000); // Match this time with your animation duration
+}
+
+function recordAudio(type) {
+    navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => {
+            const mediaRecorder = new MediaRecorder(stream);
+            let chunks = [];
+
+            mediaRecorder.start();
+
+            mediaRecorder.addEventListener('dataavailable', event => {
+                chunks.push(event.data);
+            });
+
+            mediaRecorder.addEventListener('stop', () => {
+                const blob = new Blob(chunks, { 'type': 'audio/wav' });
+                const audioUrl = URL.createObjectURL(blob);
+
+                if (type === 'master') {
+                    if (audioMasterContainer.querySelector('audio')) {
+                        audioMasterContainer.querySelector('audio').remove();
+                    }
+                    const masterAudio = new Audio(audioUrl);
+                    masterAudio.controls = true;
+                    audioMasterContainer.appendChild(masterAudio);
+                    masterRecorded = true;
+                    masterAudioBlob = blob;
+                } else {
+                    if (audioSampleContainer.querySelector('audio')) {
+                        audioSampleContainer.querySelector('audio').remove();
+                    }
+                    const sampleAudio = new Audio(audioUrl);
+                    sampleAudio.controls = true;
+                    audioSampleContainer.appendChild(sampleAudio);
+                }
+
+                sendToServer(blob, type);
+                stream.getTracks().forEach(track => track.stop());
+
+                triggerFlash(); // Trigger the flash effect on the container div
+            });
+
+            setTimeout(() => {
+                mediaRecorder.stop();
+            }, 1000);
+        })
+        .catch(error => {
+            console.error('Error accessing microphone:', error);
+        });
+}
+
+    </script>
+</body>
+
+</html> -->
+
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Comparison</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            font-family: Arial, sans-serif;
+            position: relative;
+            background-image: url('./static/sound.jpg');
+            background-size: cover;
+            background-position: center;
+        }
+
+        .container {
+            text-align: center;
+            background: rgba(255, 255, 255, 0.7);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .logo-left {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            border-radius: 10px;
+            width: 100px;
+            height: auto;
+        }
+
+        .logo-right {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            border-radius: 10px;
+            width: 100px;
+            height: auto;
+        }
+
+        .result {
+            width: 100px;
+            height: 100px;
+            border-radius: 10px;
+            margin-top: 20px;
+            text-align: center;
+            line-height: 100px;
+            font-size: 20px;
+            font-weight: bold;
+            display: inline-block;
+        }
+
+        .match {
+            background-color: green;
+            color: white;
+        }
+
+        #clock {
+            font-size: 3em;
+            margin-bottom: 20px;
+        }
+
+        button {
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px;
+            transition: background-color 0.3s, transform 0.3s;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        button:active {
+            background-color: #004080;
+            transform: scale(0.95);
+        }
+    </style>
+    <style>
+        @keyframes flash {
+            0% { background-color: rgba(255, 255, 255, 0.7); }
+            50% { background-color: rgba(255, 255, 255, 1); }
+            100% { background-color: rgba(255, 255, 255, 0.7); }
+        }
+    
+        .flash {
+            animation: flash 1s ease-in-out;
+        }
+    </style>
+</head>
+
+<body>
+    <img src="./static/download (1).jpg" alt="Left Logo" class="logo-left">
+    <img src="./static/download (2).jpg" alt="Right Logo" class="logo-right">
+    <div class="container">
+        <div id="clock"></div>
+        <h1>Record Master Audio</h1>
+        <button id="recordMaster">Start Recording Master</button>
+        <br>
+        <div id="audioMasterContainer"></div>
+        <h1>Check Sample Audio</h1>
+        <button id="recordSample">Start Recording Sample</button>
+        <button id="stopRecording" style="display: none;">Stop Recording</button>
+        <br>
+        <div id="audioSampleContainer"></div>
+        <div id="result" class="result">Result: Waiting...</div>
+    </div>
+
+    <script>
+        const recordMasterButton = document.getElementById('recordMaster');
+        const recordSampleButton = document.getElementById('recordSample');
+        const stopRecordingButton = document.getElementById('stopRecording');
+        const resultDiv = document.getElementById('result');
+        const audioMasterContainer = document.getElementById('audioMasterContainer');
+        const audioSampleContainer = document.getElementById('audioSampleContainer');
+
+        let masterRecorded = false;
+        let masterAudioBlob = null;
+        let continuousRecording = false;
+
+        recordMasterButton.addEventListener('click', () => {
+            recordAudio('master');
+        });
+
+        recordSampleButton.addEventListener('click', () => {
+            continuousRecording = true;
+            recordSampleButton.style.display = 'none';
+            stopRecordingButton.style.display = 'inline-block';
+            if (!masterRecorded && masterAudioBlob) {
+                sendToServer(masterAudioBlob, 'master');
+            }
+            continuouslyRecordAndCompare();
+        });
+
+        stopRecordingButton.addEventListener('click', () => {
+            continuousRecording = false;
+            recordSampleButton.style.display = 'inline-block';
+            stopRecordingButton.style.display = 'none';
+        });
+
+        function recordAudio(type) {
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    const mediaRecorder = new MediaRecorder(stream);
+                    let chunks = [];
+
+                    mediaRecorder.start();
+
+                    mediaRecorder.addEventListener('dataavailable', event => {
+                        chunks.push(event.data);
+                    });
+
+                    mediaRecorder.addEventListener('stop', () => {
+                        const blob = new Blob(chunks, { 'type': 'audio/wav' });
+                        const audioUrl = URL.createObjectURL(blob);
+
+                        if (type === 'master') {
+                            if (audioMasterContainer.querySelector('audio')) {
+                                audioMasterContainer.querySelector('audio').remove();
+                            }
+                            const masterAudio = new Audio(audioUrl);
+                            masterAudio.controls = true;
+                            audioMasterContainer.appendChild(masterAudio);
+                            masterRecorded = true;
+                            masterAudioBlob = blob;
+                        } else {
+                            if (audioSampleContainer.querySelector('audio')) {
+                                audioSampleContainer.querySelector('audio').remove();
+                            }
+                            const sampleAudio = new Audio(audioUrl);
+                            sampleAudio.controls = true;
+                            audioSampleContainer.appendChild(sampleAudio);
+                        }
+
+                        sendToServer(blob, type);
+                        stream.getTracks().forEach(track => track.stop());
+                    });
+
+                    setTimeout(() => {
+                        mediaRecorder.stop();
+                    }, 2000);
+                })
+                .catch(error => {
+                    console.error('Error accessing microphone:', error);
+                });
+        }
+
+        function sendToServer(blob, type) {
+            const formData = new FormData();
+            formData.append('audio', blob);
+            formData.append('type', type);
+
+            fetch('/compare', {
+                method: 'POST',
+                body: formData
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (type === 'sample') {
+                        if (data.result === 'Match') {
+                            resultDiv.innerText = 'Match';
+                            resultDiv.className = 'result match';
+                            setTimeout(() => {
+                                resultDiv.className = 'result';
+                                resultDiv.innerText = 'Result: Waiting...';
+                                if (continuousRecording) {
+                                    continuouslyRecordAndCompare();
+                                }
+                            }, 2000);
+                        } else {
+                            if (continuousRecording) {
+                                continuouslyRecordAndCompare();
+                            }
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+        }
+
+        function continuouslyRecordAndCompare() {
+            if (continuousRecording) {
+                recordAudio('sample');
+            }
+        }
+
+        function updateClock() {
+            const now = new Date();
+            const hours = now.getHours().toString().padStart(2, '0');
+            const minutes = now.getMinutes().toString().padStart(2, '0');
+            const seconds = now.getSeconds().toString().padStart(2, '0');
+
+            const clockDisplay = `${hours}:${minutes}:${seconds}`;
+            document.getElementById('clock').innerText = clockDisplay;
+        }
+
+        function updateClockEverySecond() {
+            updateClock();
+            setInterval(updateClock, 2000);
+        }
+
+        updateClockEverySecond();
+    </script>
+    <script>
+        const containerDiv = document.querySelector('.container');
+
+        function triggerFlash() {
+            containerDiv.classList.add('flash');
+            setTimeout(() => {
+                containerDiv.classList.remove('flash');
+            }, 2000); // Match this time with your animation duration
+        }
+
+        function recordAudio(type) {
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    const mediaRecorder = new MediaRecorder(stream);
+                    let chunks = [];
+
+                    mediaRecorder.start();
+
+                    mediaRecorder.addEventListener('dataavailable', event => {
+                        chunks.push(event.data);
+                    });
+
+                    mediaRecorder.addEventListener('stop', () => {
+                        const blob = new Blob(chunks, { 'type': 'audio/wav' });
+                        const audioUrl = URL.createObjectURL(blob);
+
+                        if (type === 'master') {
+                            if (audioMasterContainer.querySelector('audio')) {
+                                audioMasterContainer.querySelector('audio').remove();
+                            }
+                            const masterAudio = new Audio(audioUrl);
+                            masterAudio.controls = true;
+                            audioMasterContainer.appendChild(masterAudio);
+                            masterRecorded = true;
+                            masterAudioBlob = blob;
+                        } else {
+                            if (audioSampleContainer.querySelector('audio')) {
+                                audioSampleContainer.querySelector('audio').remove();
+                            }
+                            const sampleAudio = new Audio(audioUrl);
+                            sampleAudio.controls = true;
+                            audioSampleContainer.appendChild(sampleAudio);
+                        }
+
+                        sendToServer(blob, type);
+                        stream.getTracks().forEach(track => track.stop());
+
+                        triggerFlash(); // Trigger the flash effect on the container div
+                    });
+
+                    setTimeout(() => {
+                        mediaRecorder.stop();
+                    }, 2000);
+                })
+                .catch(error => {
+                    console.error('Error accessing microphone:', error);
+                });
+        }
+    </script>
+</body>
+
+</html>
